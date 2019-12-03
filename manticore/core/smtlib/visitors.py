@@ -187,6 +187,21 @@ def get_depth(exp):
     return visitor.result
 
 
+class NodeCounter(GetDepth):
+    """ Simple visitor to collect all variables in an expression or set of
+        expressions
+    """
+
+    def visit_Operation(self, expression, *operands):
+        return 1 + sum(operands)
+
+
+def count_nodes(exp):
+    visitor = NodeCounter()
+    visitor.visit(exp)
+    return visitor.result
+
+
 class PrettyPrinter(Visitor):
     def __init__(self, depth=None, **kwargs):
         super().__init__(**kwargs)

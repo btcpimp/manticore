@@ -338,6 +338,15 @@ class ConstraintSet:
         migrated_expression = replace(expression, object_migration_map)
         return migrated_expression
 
+    @classmethod
+    def merge(cls, cs1, cs2):
+        new_set = cls()
+        for c in cs1.constraints:
+            new_set.add(c)
+        for c in cs2.constraints:
+            new_set.add(c)
+        return new_set
+
     def new_bool(self, name=None, taint=frozenset(), avoid_collisions=False):
         """ Declares a free symbolic boolean in the constraint store
             :param name: try to assign name to internal variable representation,

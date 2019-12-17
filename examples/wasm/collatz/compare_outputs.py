@@ -13,7 +13,18 @@ from manticore.core.smtlib.solver import Z3Solver
 from manticore.core.smtlib.constraints import ConstraintSet
 from manticore.core.smtlib import Operators
 
+from networkx.drawing.nx_agraph import write_dot
+from manticore.utils.graphing import graph_expression_tree
+
+from manticore.utils.config import get_group
+
+core = get_group("core")
+core.mprocessing = core.mprocessing.single
+
 solver = Z3Solver.instance()
+
+wasm_constraint = None
+native_constraint = None
 
 
 class CaptureForkConstraints(Plugin):
@@ -25,9 +36,11 @@ class CaptureForkConstraints(Plugin):
 
 
 def getchar(constraints, _addr):
-    res = constraints.new_bitvec(32, "getchar_res")
-    constraints.add(res == (2 ** 3))
-    return [res]
+    global wasm_constraint
+    wasm_constraint = constraints.new_bitvec(32, "getchar_res")
+    # res = constraints.new_bitvec(32, "getchar_res")
+    constraints.add(wasm_constraint == (2 ** 3))
+    return [wasm_constraint]
 
 
 set_verbosity(2)
@@ -44,7 +57,7 @@ wasm_final = arithmetic_simplify(constant_folder(wasm_fork_expressions[-1]))
 # print(pretty_print(wasm_final, depth=min(24, depth)))
 # print()
 # print(depth, "::", count)
-wasm_constraints = next(m.all_states)._constraints
+wasm_constraint_set = next(m.all_states)._constraints
 
 
 class NativeCaptureForkConstraints(Plugin):
@@ -61,10 +74,11 @@ m2.register_plugin(native_plugin)
 
 @m2.hook(0x00010A0)
 def hook(state):
-    sym = state.new_symbolic_value(32)
+    global native_constraint
+    native_constraint = state.new_symbolic_value(32)
     rsi = state.new_symbolic_value(64)
-    state.constrain(sym == (2 ** 3))
-    state.cpu.EAX = sym
+    state.constrain(native_constraint == (2 ** 3))
+    state.cpu.EAX = native_constraint
     state.cpu.RSI = rsi
 
 
@@ -79,20 +93,25 @@ m2.run()
 
 native_fork_expressions = native_plugin.context.get("fork_constraints")
 native_final = arithmetic_simplify(constant_folder(native_fork_expressions[-1]))
-# depth = get_depth(native_final)
-# count = count_nodes(native_final)
-# print(pretty_print(native_final, depth=min(24, depth)))
-# print()
-# print(depth, "::", count)
-native_constraints = next(m2.all_states)._constraints
+native_constraint_set = next(m2.all_states)._constraints
 
-merged = ConstraintSet.merge(wasm_constraints, native_constraints)
 
-native_final = native_final == 4331
+# Merge constraints
+merged = ConstraintSet.merge(wasm_constraint_set, native_constraint_set)
+print(wasm_constraint, native_constraint)
+merged.add(wasm_constraint == native_constraint)
+
+# Set constraints equal to the same code path
+native_final = native_final == 0x10EB
 wasm_final = wasm_final == 0
-print(count_nodes(native_final), count_nodes(wasm_final))
-print("Native:", solver.get_all_values(merged, native_final))
-print("WASM:", solver.get_all_values(merged, wasm_final))
+
+# Evaluate equivalence
 eq = wasm_final == native_final
 print("Can be equal:", solver.can_be_true(merged, eq))
 print("Must be equal:", solver.must_be_true(merged, eq))
+
+# Generate graphs
+native_graph = graph_expression_tree(native_final, native_constraint_set)
+wasm_graph = graph_expression_tree(wasm_final, wasm_constraint_set)
+write_dot(native_graph, "native.dot")
+write_dot(wasm_graph, "wasm.dot")
